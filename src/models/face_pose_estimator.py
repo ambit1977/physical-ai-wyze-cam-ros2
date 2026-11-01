@@ -128,11 +128,10 @@ class FacePoseEstimator:
         yaw_geom = float(np.clip(((nose[0] - eye_mid[0]) / (0.5 * eye_dist)) * 60.0, -80.0, 80.0))
 
         # 垂直角度(Pitch): (目〜鼻の距離) と (鼻〜顎の距離) の比率から算出
-        # 上を向くと鼻が目線に近づき(d_upper小)・顎が離れる(d_lower大) -> ratio減少 -> Pitch正(上向き)
         d_upper = max(1.0, float(nose[1] - eye_mid[1]))
         d_lower = max(1.0, float(chin[1] - nose[1]))
         up_down_ratio = d_upper / d_lower
-        pitch_geom = float(np.clip((0.56 - up_down_ratio) * 130.0, -65.0, 65.0))
+        pitch_geom = float(np.clip((0.55 - up_down_ratio) * 75.0, -50.0, 50.0))
 
         roll_deg = float(
             np.degrees(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))

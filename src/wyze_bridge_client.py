@@ -69,7 +69,7 @@ class WyzeBridgeClient:
         else:
             # Pan v3: horizontal 0..350 (center=180), vertical 0..180 (level=90, up=180, down=0)
             wyze_horiz = int(round(max(0.0, min(350.0, 180.0 + pan_deg))))
-            wyze_vert = int(round(max(0.0, min(180.0, 90.0 + tilt_deg * 2.0))))
+            wyze_vert = int(round(max(0.0, min(180.0, 90.0 + tilt_deg * 1.15))))
             url = f"{self.bridge_host}/api/{self.cam_name}/ptz_position/{wyze_vert},{wyze_horiz}"
             ok = self._request(url)
             if ok:

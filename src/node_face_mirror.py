@@ -66,7 +66,7 @@ def decorate_wyze_frame(wyze_frame: np.ndarray | None, width: int, height: int, 
     cv2.rectangle(panel, (12, 12), (420, 82), (20, 20, 20), -1)
     cv2.putText(panel, "Wyze Cam Pan v3 Live View (RTSP)", (24, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (50, 255, 100), 2)
     wyze_h = int(round(max(0.0, min(350.0, 180.0 + pan))))
-    wyze_v = int(round(max(0.0, min(180.0, 90.0 + tilt * 2.0))))
+    wyze_v = int(round(max(0.0, min(180.0, 90.0 + tilt * 1.15))))
     cv2.putText(panel, f"HW Servo Angle : H={wyze_h:3d} deg / V={wyze_v:3d} deg", (24, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.54, (255, 255, 255), 2)
     return panel
 
@@ -77,9 +77,9 @@ def main():
     parser.add_argument("--wyze-rtsp", type=str, default=Config.WYZE_CAM_RTSP, help="Wyze Cam live RTSP stream URL")
     parser.add_argument("--no-wyze-view", action="store_true", help="Disable side-by-side Wyze Cam live stream")
     parser.add_argument("--model", type=str, default="data/face_to_ptz.pt", help="Path to trained FaceToPTZNet weights")
-    parser.add_argument("--gain-pan", type=float, default=1.35, help="Pan angle multiplier")
-    parser.add_argument("--gain-tilt", type=float, default=1.60, help="Tilt angle multiplier (boosted for vertical responsiveness)")
-    parser.add_argument("--ema", type=float, default=0.55, help="EMA smoothing factor (0..1)")
+    parser.add_argument("--gain-pan", type=float, default=1.20, help="Pan angle multiplier")
+    parser.add_argument("--gain-tilt", type=float, default=0.80, help="Tilt angle multiplier (natural vertical sensitivity)")
+    parser.add_argument("--ema", type=float, default=0.40, help="EMA smoothing factor (0..1)")
     parser.add_argument("--dry-run", action="store_true", help="Run without sending HTTP requests to Wyze Cam")
     parser.add_argument("--record", type=str, default="", help="Optional MP4 path to record demonstration video")
     args = parser.parse_args()
