@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-ROS2 Proxy Node for Wyze Cam Pan v3 (via docker-wyze-bridge).
+ROS2 Proxy Node for Wyze Cam Pan v3 (`HL_PAN3`) via docker-wyze-bridge.
 
 Subscribes to:
   1. `/wyze/cmd_ptz` (std_msgs/String JSON):
-     e.g. {"pan": 180.0, "tilt": 0.0, "mode": "degree"}
+     e.g. {"pan": 0.0, "tilt": 0.0, "mode": "degree"}
      or   {"action": "left"}
   2. `/cmd_vel` (geometry_msgs/Twist):
      Roomba互換インターフェース！
-     angular.z (rad/s) -> Pan 回転角度/アクションに変換
-     linear.x  (m/s)   -> Tilt 上下角度/アクションに変換
+     angular.z (rad/s) -> Pan 回転角度に変換
+     linear.x  (m/s)   -> Tilt 上下角度に変換
 
 Publishes:
-  - `/wyze/ptz_state` (std_msgs/String JSON): 現在の推定Pan/Tilt状態と最終送信ステータス
+  - `/wyze/ptz_state` (std_msgs/String JSON): 現在のPan/Tilt状態と最終送信ステータス
 """
 
 import json
@@ -29,19 +29,17 @@ class WyzePTZProxyNode(Node):
     def __init__(self):
         super().__init__('wyze_ptz_proxy_node')
 
-        self.bridge_host = os.environ.get('WYZE_BRIDGE_HOST', 'http://localhost:5000').rstrip('/')
-        self.cam_name = os.environ.get('WYZE_CAM_NAME', 'wyze-cam-pan')
-        self.ptz_method = os.environ.get('WYZE_PTZ_METHOD', 'degree')  # 'degree' or 'action'
+        self.bridge_host = os.environ.get('WYZE_BRIDGE_HOST', 'http://wyze-bridge:5000').rstrip('/')
+        self.cam_name = os.environ.get('WYZE_CAM_NAME', 'wyze')
+        self.ptz_method = os.environ.get('WYZE_PTZ_METHOD', 'degree')  # 'degree' (ptz_position) or 'action'
         self.dry_run = os.environ.get('WYZE_DRY_RUN', 'false').lower() in ('1', 'true', 'yes')
 
-        # 現在のカメラ角度状態 (Pan: -180〜+180 deg, Tilt: -45〜+90 deg)
         self.current_pan = 0.0
         self.current_tilt = 0.0
         self.last_cmd_time = 0.0
-        self.min_cmd_interval = 0.40  # WyzeクラウドAPI負荷軽減のための最小送信間隔(秒)
-        self.deadband_deg = 2.5       # 微小揺れ無視閾値(度)
+        self.min_cmd_interval = 0.35
+        self.deadband_deg = 2.5
 
-        # Subscribers
         self.sub_ptz = self.create_subscription(
             String,
             '/wyze/cmd_ptz',
@@ -54,8 +52,6 @@ class WyzePTZProxyNode(Node):
             self.on_cmd_vel,
             10,
         )
-
-        # Publisher
         self.pub_state = self.create_publisher(String, '/wyze/ptz_state', 10)
 
         self.get_logger().info(
@@ -64,7 +60,6 @@ class WyzePTZProxyNode(Node):
         )
 
     def on_cmd_ptz(self, msg: String):
-        """JSON形式のPTZ指令を処理"""
         try:
             payload = json.loads(msg.data)
         except Exception as e:
@@ -90,8 +85,6 @@ class WyzePTZProxyNode(Node):
         self.move_to_angles(target_pan, target_tilt)
 
     def on_cmd_vel(self, msg: Twist):
-        """ルンバ互換 `/cmd_vel` (geometry_msgs/Twist) からPTZへのプロキシ変換"""
-        # angular.z (左回転が正) -> pan差分 (deg), linear.x (前進が正) -> tilt差分 (deg)
         delta_pan = float(msg.angular.z) * 30.0
         delta_tilt = float(msg.linear.x) * 30.0
 
@@ -103,13 +96,11 @@ class WyzePTZProxyNode(Node):
         self.move_to_angles(target_pan, target_tilt)
 
     def move_to_angles(self, pan_deg: float, tilt_deg: float):
-        """目標Pan/Tilt角度に制限・デッドバンドを適用してdocker-wyze-bridgeへ送信"""
         now = time.time()
         if now - self.last_cmd_time < self.min_cmd_interval:
             return
 
-        # 角度クランプ (Pan: -180..180, Tilt: -45..90)
-        pan_deg = max(-180.0, min(180.0, pan_deg))
+        pan_deg = max(-170.0, min(170.0, pan_deg))
         tilt_deg = max(-45.0, min(90.0, tilt_deg))
 
         err_pan = pan_deg - self.current_pan
@@ -120,52 +111,52 @@ class WyzePTZProxyNode(Node):
         self.last_cmd_time = now
 
         if self.ptz_method == 'action':
-            # ステップ移動モード: 誤差の大きい軸から優先してアクション発行
-            if abs(err_pan) >= abs(err_tilt):
-                action = 'right' if err_pan > 0 else 'left'
-                self.send_rotary_action(action)
-                self.current_pan += 10.0 if err_pan > 0 else -10.0
-            else:
-                action = 'up' if err_tilt > 0 else 'down'
-                self.send_rotary_action(action)
-                self.current_tilt += 8.0 if err_tilt > 0 else -8.0
+            h_code = 2 if err_pan >= self.deadband_deg else (1 if err_pan <= -self.deadband_deg else 0)
+            v_code = 1 if err_tilt >= self.deadband_deg else (2 if err_tilt <= -self.deadband_deg else 0)
+            ok = self.send_rotary_action(f'{h_code},{v_code}')
+            if ok:
+                self.current_pan = pan_deg
+                self.current_tilt = tilt_deg
         else:
-            # 絶対角度指定モード (docker-wyze-bridge: /api/<cam>/rotary_degree/<pan>,<tilt>)
-            # Wyze内部表現(0..360, 0..90)に合わせてシフト
-            wyze_pan = int(round((pan_deg + 180.0) % 360.0))
-            wyze_tilt = int(round(max(0.0, min(90.0, tilt_deg + 45.0))))
-            ok = self.send_rotary_degree(wyze_pan, wyze_tilt)
+            # Wyze Cam Pan v3 (HL_PAN3): /api/<cam>/ptz_position/<vertical>,<horizontal>
+            wyze_horiz = int(round(max(0.0, min(350.0, 180.0 + pan_deg))))
+            wyze_vert = int(round(max(0.0, min(180.0, 90.0 + tilt_deg))))
+            ok = self.send_ptz_position(wyze_vert, wyze_horiz)
             if ok:
                 self.current_pan = pan_deg
                 self.current_tilt = tilt_deg
 
         self.publish_state()
 
-    def send_rotary_degree(self, wyze_pan: int, wyze_tilt: int) -> bool:
-        url = f'{self.bridge_host}/api/{self.cam_name}/rotary_degree/{wyze_pan},{wyze_tilt}'
+    def send_ptz_position(self, wyze_vert: int, wyze_horiz: int) -> bool:
+        url = f'{self.bridge_host}/api/{self.cam_name}/ptz_position/{wyze_vert},{wyze_horiz}'
         if self.dry_run:
-            self.get_logger().info(f'[DRY-RUN] POST {url}')
+            self.get_logger().info(f'[DRY-RUN] GET {url}')
             return True
         try:
-            resp = requests.post(url, timeout=2.5)
-            if resp.status_code >= 400:
-                resp = requests.get(url, timeout=2.5)
-            self.get_logger().info(f'Sent rotary_degree({wyze_pan}, {wyze_tilt}) -> {resp.status_code}')
+            resp = requests.get(url, timeout=2.5)
+            self.get_logger().info(f'Sent ptz_position(vert={wyze_vert}, horiz={wyze_horiz}) -> {resp.status_code}')
             return resp.ok
         except Exception as e:
             self.get_logger().warning(f'Bridge request failed ({url}): {e}')
             return False
 
     def send_rotary_action(self, action: str) -> bool:
-        url = f'{self.bridge_host}/api/{self.cam_name}/rotary_action/{action}'
+        action_map = {
+            'left': '1,0',
+            'right': '2,0',
+            'up': '0,1',
+            'down': '0,2',
+            'stop': '0,0',
+        }
+        payload = action_map.get(action, action)
+        url = f'{self.bridge_host}/api/{self.cam_name}/rotary_action/{payload}'
         if self.dry_run:
-            self.get_logger().info(f'[DRY-RUN] POST {url}')
+            self.get_logger().info(f'[DRY-RUN] GET {url}')
             return True
         try:
-            resp = requests.post(url, timeout=2.5)
-            if resp.status_code >= 400:
-                resp = requests.get(url, timeout=2.5)
-            self.get_logger().info(f'Sent rotary_action({action}) -> {resp.status_code}')
+            resp = requests.get(url, timeout=2.5)
+            self.get_logger().info(f'Sent rotary_action({payload}) -> {resp.status_code}')
             return resp.ok
         except Exception as e:
             self.get_logger().warning(f'Bridge action failed ({url}): {e}')

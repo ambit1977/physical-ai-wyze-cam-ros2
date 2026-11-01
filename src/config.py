@@ -9,8 +9,8 @@ load_dotenv(ROOT_DIR / ".env")
 
 
 class Config:
-    WYZE_BRIDGE_HOST: str = os.getenv("WYZE_BRIDGE_HOST", "http://localhost:5000").rstrip("/")
-    WYZE_CAM_NAME: str = os.getenv("WYZE_CAM_NAME", "wyze-cam-pan")
+    WYZE_BRIDGE_HOST: str = os.getenv("WYZE_BRIDGE_HOST", "http://localhost:5050").rstrip("/")
+    WYZE_CAM_NAME: str = os.getenv("WYZE_CAM_NAME", "wyze")
     WYZE_PTZ_METHOD: str = os.getenv("WYZE_PTZ_METHOD", "degree")
 
     # 静止カメラ（ATOM Cam 2 RTSP または USB/Mac内蔵カメラ番号）

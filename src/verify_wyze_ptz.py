@@ -7,13 +7,14 @@ rotary_degree / rotary_action が実機で動くかを即座に検証できま�
 
 import argparse
 import time
+from src.config import Config
 from src.wyze_bridge_client import WyzeBridgeClient
 
 
 def main():
     parser = argparse.ArgumentParser(description="Verify Wyze Cam Pan v3 PTZ control via docker-wyze-bridge")
-    parser.add_argument("--host", type=str, default="http://localhost:5000")
-    parser.add_argument("--cam", type=str, default="wyze-cam-pan")
+    parser.add_argument("--host", type=str, default=Config.WYZE_BRIDGE_HOST)
+    parser.add_argument("--cam", type=str, default=Config.WYZE_CAM_NAME)
     parser.add_argument("--method", type=str, default="degree", choices=["degree", "action"])
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

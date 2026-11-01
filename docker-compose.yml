@@ -7,7 +7,7 @@ services:
     container_name: wyze-bridge
     restart: unless-stopped
     ports:
-      - "5000:5000"   # WebUI & HTTP Control API (/api/<cam>/rotary_degree 等)
+      - "5050:5000"   # WebUI & HTTP Control API (/api/<cam>/rotary_degree 等) - macOS AirPlay(5000)回避
       - "8554:8554"   # RTSP Stream (rtsp://localhost:8554/<cam-name>)
       - "8888:8888"   # HLS Stream
     environment:
