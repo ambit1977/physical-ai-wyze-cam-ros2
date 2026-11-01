@@ -1,0 +1,41 @@
+services:
+  # ----------------------------------------------------------------------------
+  # 1. docker-wyze-bridge: Wyze Cam Pan v3 のクラウドAPI/PTZ制御＆RTSPブリッジ
+  # ----------------------------------------------------------------------------
+  wyze-bridge:
+    image: mrlt8/wyze-bridge:latest
+    container_name: wyze-bridge
+    restart: unless-stopped
+    ports:
+      - "5000:5000"   # WebUI & HTTP Control API (/api/<cam>/rotary_degree 等)
+      - "8554:8554"   # RTSP Stream (rtsp://localhost:8554/<cam-name>)
+      - "8888:8888"   # HLS Stream
+    environment:
+      - WYZE_EMAIL=${WYZE_EMAIL:-}
+      - WYZE_PASSWORD=${WYZE_PASSWORD:-}
+      - API_ID=${API_ID:-}
+      - API_KEY=${API_KEY:-}
+      - WB_AUTH=${WB_AUTH:-false}
+      - NET_MODE=ANY
+      - ON_DEMAND=false
+
+  # ----------------------------------------------------------------------------
+  # 2. ROS2 Humble (rosbridge_server + wyze_ptz_proxy_node)
+  #    ルンバ制御 (/cmd_vel) や PTZ指令 (/wyze/cmd_ptz) を受け取り wyze-bridge を駆動
+  # ----------------------------------------------------------------------------
+  ros2-wyze-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.ros2
+    container_name: ros2-wyze-proxy
+    restart: unless-stopped
+    ports:
+      - "9090:9090"   # rosbridge WebSocket (ホスト側PythonのAIノードと通信)
+    environment:
+      - WYZE_BRIDGE_HOST=http://wyze-bridge:5000
+      - WYZE_CAM_NAME=${WYZE_CAM_NAME:-wyze-cam-pan}
+      - WYZE_PTZ_METHOD=${WYZE_PTZ_METHOD:-degree}
+    volumes:
+      - ./ros2_ws/src:/ros2_ws/src
+    depends_on:
+      - wyze-bridge

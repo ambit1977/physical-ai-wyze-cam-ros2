@@ -1,0 +1,22 @@
+# Python / Virtualenv
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Environment variables & Secrets (NEVER COMMIT)
+.env
+*.env.local
+
+# ROS2 build artifacts
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# Media / Recorded videos / Large weights
+data/*.mp4
+*.mp4
+yolov8*.pt
+.DS_Store

@@ -1,0 +1,19 @@
+FROM ros:humble-ros-base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip \
+    python3-requests \
+    python3-colcon-common-extensions \
+    ros-humble-rosbridge-suite \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /ros2_ws
+COPY ros2_ws/src /ros2_ws/src
+
+RUN /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build --symlink-install"
+
+RUN printf '#!/bin/bash\nset -e\nsource /opt/ros/humble/setup.bash\nsource /ros2_ws/install/setup.bash\nros2 launch rosbridge_server rosbridge_websocket_launch.xml &\nexec ros2 run wyze_ptz_proxy wyze_ptz_proxy_node "$@"\n' > /entrypoint.sh && \
+    chmod +x /entrypoint.sh
+
+EXPOSE 9090
+ENTRYPOINT ["/entrypoint.sh"]
