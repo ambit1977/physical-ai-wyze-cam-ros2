@@ -3,7 +3,8 @@
 東京大学松尾研究室 Physical AI 講座 2026（応用編1）最終課題リポジトリです。
 市販のスマートPTZカメラ **Wyze Cam Pan v3 (`HL_PAN3`)** を 2自由度（Pan/Tilt）のアクティブビジョン・ロボットとして扱い、**ROS2 Humble（`/wyze/cmd_ptz` およびルンバ Create 3 互換 `/cmd_vel`）** を介して実機制御するシステムを実装しています。
 
-📄 **詳細な提出レポート（概要・目的・工夫点・今後の発展課題）**: **[REPORT.md](./REPORT.md)**
+📄 **詳細な提出レポート（概要・目的・工夫点・今後の発展課題）**: **[REPORT.md](./REPORT.md)**  
+🎬 **デモ動画公開チャンネル (YouTube)**: https://www.youtube.com/@ericapapapapapa （2倍速・`2x Speed` 明記版）
 
 ---
 
