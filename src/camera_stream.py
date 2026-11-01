@@ -55,6 +55,31 @@ class CameraStream:
                 self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
         else:
             self.cap = cv2.VideoCapture(self.source)
+            # macOS AVFoundation カメラセンサー起動ウォームアップ
+            if self.cap.isOpened():
+                time.sleep(0.2)
+                for _ in range(5):
+                    ret, test_f = self.cap.read()
+            else:
+                ret, test_f = False, None
+            # 仮想カメラ(OBS/iPhone連携等)で真っ暗(輝度0)な場合は自動で実カメラ(2, 1, 0, 3)を探索
+            if not ret or test_f is None or test_f.mean() < 1.0:
+                for candidate_idx in (2, 1, 0, 3):
+                    if candidate_idx == self.source:
+                        continue
+                    c = cv2.VideoCapture(candidate_idx)
+                    if c.isOpened():
+                        time.sleep(0.2)
+                        for _ in range(5):
+                            ok, cf = c.read()
+                        if ok and cf is not None and cf.mean() >= 1.0:
+                            print(f"[CameraStream] Auto-selected active camera index {candidate_idx} (brightness={cf.mean():.1f})")
+                            if self.cap is not None:
+                                self.cap.release()
+                            self.cap = c
+                            self.source = candidate_idx
+                            break
+                        c.release()
 
         if self.cap is not None and self.cap.isOpened():
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)

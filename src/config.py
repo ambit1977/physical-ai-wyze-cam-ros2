@@ -14,7 +14,7 @@ class Config:
     WYZE_PTZ_METHOD: str = os.getenv("WYZE_PTZ_METHOD", "degree")
 
     # 静止カメラ（ATOM Cam 2 RTSP または USB/Mac内蔵カメラ番号）
-    STATIC_CAM_SOURCE: str = os.getenv("STATIC_CAM_SOURCE", "0")
+    STATIC_CAM_SOURCE: str = os.getenv("STATIC_CAM_SOURCE", "2")
     # Wyze Cam RTSP URL
     WYZE_CAM_RTSP: str = os.getenv("WYZE_CAM_RTSP", f"rtsp://localhost:8554/{WYZE_CAM_NAME}")
 
