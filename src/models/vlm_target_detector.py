@@ -87,13 +87,22 @@ class VLMTargetDetector:
 
         if self.backend == "yolo":
             try:
-                from ultralytics import YOLO
+                from ultralytics import YOLOWorld
 
-                print("[VLMTargetDetector] Loading YOLOv8n detector...")
-                self.model = YOLO("yolov8n.pt")
+                print("[VLMTargetDetector] Loading YOLO-World (CLIP Open-Vocabulary) detector...")
+                self.model = YOLOWorld("yolov8s-world.pt")
+                self._current_classes = ["cup", "plastic bottle", "cell phone", "milk carton"]
+                self.model.set_classes(self._current_classes)
             except Exception as e:
-                print(f"[VLMTargetDetector] YOLOv8 not available ({e}), using color/contour fallback.")
-                self.backend = "color"
+                print(f"[VLMTargetDetector] YOLO-World fallback to YOLOv8n ({e})...")
+                try:
+                    from ultralytics import YOLO
+
+                    self.model = YOLO("yolov8n.pt")
+                    self._current_classes = None
+                except Exception as e2:
+                    print(f"[VLMTargetDetector] YOLOv8 not available ({e2}), using color fallback.")
+                    self.backend = "color"
 
     def detect(
         self, frame_bgr: np.ndarray, target_prompt: str, conf_threshold: float = 0.20
@@ -177,13 +186,18 @@ class VLMTargetDetector:
     def _detect_yolo(
         self, frame_bgr: np.ndarray, target_prompt: str, conf_threshold: float, w: int, h: int
     ) -> Optional[TargetDetection]:
+        target_lower = target_prompt.lower().strip()
+        # YOLO-World の場合、未知のクラス名が来たら動的に set_classes を更新
+        if getattr(self, "_current_classes", None) is not None and target_lower not in self._current_classes:
+            self._current_classes = ["cup", "plastic bottle", "cell phone", "milk carton", target_lower]
+            self.model.set_classes(self._current_classes)
+
         results = self.model.predict(frame_bgr, conf=conf_threshold, verbose=False)
         if not results or len(results[0].boxes) == 0:
             return None
 
         boxes = results[0].boxes
         names = results[0].names
-        target_lower = target_prompt.lower().strip()
 
         best_det: Optional[TargetDetection] = None
         for box in boxes:

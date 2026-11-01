@@ -46,7 +46,9 @@ from src.models.vlm_target_detector import VLMTargetDetector
 WEB_HTML_PATH = Path(__file__).resolve().parent / "web" / "quest_hmd_wyze.html"
 CERT_FILE = Path("/tmp/pai_quest_cert.pem")
 KEY_FILE = Path("/tmp/pai_quest_key.pem")
-AI_TARGETS = ["cup", "bottle", "cell phone", "person"]
+# カップ、ペットボトル、スマホ、牛乳パック (YOLO-World / OWLv2 対応)
+AI_TARGETS = ["cup", "plastic bottle", "cell phone", "milk carton"]
+AI_TARGET_LABELS = ["Cup (カップ)", "Bottle (ペットボトル)", "Phone (スマホ)", "Milk Carton (牛乳パック)"]
 
 
 def get_lan_ip() -> str:
@@ -311,10 +313,20 @@ def start_webxr_https_server(state: SharedTeleopState, host_ip: str, port: int =
                             state.raw_pitch = 0.0
                             state.smooth_pan = 0.0
                             state.smooth_tilt = 0.0
+                        elif data.get("set_target"):
+                            state.ai_mode = bool(data.get("ai_mode", False))
+                            state.ai_target_idx = int(data.get("target_idx", 0)) % len(AI_TARGETS)
+                            print(
+                                f"[Quest WebXR] AI Mode={state.ai_mode}, Target='{state.current_ai_target}'"
+                            )
                         elif data.get("toggle_ai"):
                             state.ai_mode = bool(data.get("ai_mode", not state.ai_mode))
                         else:
                             state.paused = bool(data.get("paused", False))
+                            if "ai_mode" in data:
+                                state.ai_mode = bool(data["ai_mode"])
+                            if "target_idx" in data:
+                                state.ai_target_idx = int(data["target_idx"]) % len(AI_TARGETS)
                             if not state.paused:
                                 state.raw_yaw = float(data.get("yaw", 0.0))
                                 state.raw_pitch = float(data.get("pitch", 0.0))
@@ -376,31 +388,32 @@ def main():
     pub_hud_json.setsockopt(zmq.LINGER, 0)
     pub_hud_json.bind("tcp://0.0.0.0:10012")
 
-    # 3. Wyze Cam RTSP ストリーム & ROS2 バス & AI 検出器
-    wyze_stream = CameraStream(args.wyze_rtsp, width=640, height=480)
+    # 3. Wyze Cam RTSP ストリーム (本来の 16:9 広角フル画角 960x540 で取得) & ROS2 バス & AI 検出器
+    wyze_stream = CameraStream(args.wyze_rtsp, width=960, height=540)
     bus = ROS2WyzeBus(dry_run=args.dry_run)
     detector: Optional[VLMTargetDetector] = None
 
     writer = None
 
-    print("\n" + "=" * 72)
-    print("  Quest HMD × ROS2 × Wyze Cam Pan v3 システム起動完了！")
-    print(f"  [方式1: HMD頭追従 + 視界固定スクリーン] Questブラウザで開く: https://{lan_ip}:8443")
+    print("\n" + "=" * 76)
+    print("  Quest MR Passthrough × ROS2 × Wyze Cam Pan v3 (16:9 Wide) 起動完了！")
+    print(f"  [方式1: MRパススルー + HMD頭追従] Questブラウザで開く: https://{lan_ip}:8443")
     print("  [方式2: Open Teach APK] Questの『Open Teach LIBERO Controller』を起動")
-    print("  Mac側キー操作: [a] AI自動ロックオン切替 | [t] ターゲット変更 | [r] 正面リセット | [q] 終了")
-    print("=" * 72 + "\n")
+    print("  ターゲット: 1.カップ(cup) / 2.ペットボトル(plastic bottle) / 3.スマホ(cell phone) / 4.牛乳パック(milk carton)")
+    print("  Mac側キー操作: [a] AI自動追尾ON/OFF | [t] ターゲット切替 | [r] 正面リセット | [q] 終了")
+    print("=" * 76 + "\n")
 
     try:
         while True:
             frame = wyze_stream.read()
             if frame is None:
-                view = np.zeros((480, 640, 3), dtype=np.uint8)
+                view = np.zeros((540, 960, 3), dtype=np.uint8)
                 cv2.putText(
                     view,
-                    "Waiting for Wyze Cam RTSP stream...",
-                    (110, 240),
+                    "Waiting for Wyze Cam 16:9 RTSP stream...",
+                    (220, 270),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
+                    0.75,
                     (0, 200, 255),
                     2,
                 )
@@ -499,10 +512,15 @@ def main():
                 with state.lock:
                     state.latest_jpeg = buf_jpg.tobytes()
 
-            # 2. OpenTeach APK 向け ZeroMQ 映像配信 (256x256 @ TCP 10505, 128x128 @ TCP 10506)
-            # Unity Texture2D.LoadImage 用に上下反転補正した正方形フレームを送信
-            sq_main = cv2.resize(view, (256, 256))
-            ok_m, buf_m = cv2.imencode(".jpg", sq_main, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            # 2. OpenTeach APK 向け ZeroMQ 映像配信 (TCP 10505)
+            # 16:9 の広い画角を一切潰さず、256x256 内に 256x144 (16:9) でレターボックス配置
+            sq_main = np.zeros((256, 256, 3), dtype=np.uint8)
+            wide_small = cv2.resize(view, (256, 144))
+            sq_main[56:200, 0:256] = wide_small
+            cv2.putText(sq_main, f"{status_label[:26]}", (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.45, status_color, 1)
+            cv2.putText(sq_main, f"Pan:{cmd_pan:+5.1f} Tilt:{cmd_tilt:+5.1f}", (8, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+            cv2.putText(sq_main, "A:Clutch/Center  B:Target", (8, 232), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (180, 220, 255), 1)
+            ok_m, buf_m = cv2.imencode(".jpg", sq_main, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
             if ok_m:
                 pub_main_img.send(buf_m.tobytes())
 

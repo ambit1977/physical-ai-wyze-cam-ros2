@@ -32,7 +32,7 @@ from src.ros2_bus import ROS2WyzeBus
 from src.models.vlm_target_detector import VLMTargetDetector
 
 
-PRESET_TARGETS = ["cup", "bottle", "cell phone", "person", "book", "remote"]
+PRESET_TARGETS = ["cup", "plastic bottle", "cell phone", "milk carton"]
 
 
 def main():
