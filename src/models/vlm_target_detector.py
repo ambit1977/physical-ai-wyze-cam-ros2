@@ -91,21 +91,45 @@ class VLMTargetDetector:
 
                 print("[VLMTargetDetector] Loading YOLO-World (CLIP Open-Vocabulary) detector...")
                 self.model = YOLOWorld("yolov8s-world.pt")
-                self._current_classes = ["cup", "plastic bottle", "cell phone", "milk carton"]
-                self.model.set_classes(self._current_classes)
+                self._active_target_key = ""
+                self._target_synonyms = {
+                    "cup": ["cup", "coffee mug"],
+                    "plastic bottle": ["plastic bottle", "water bottle", "bottle"],
+                    "cell phone": ["cell phone", "smartphone"],
+                    "milk carton": ["milk carton", "paper beverage carton"],
+                }
+                self._distractor_classes = [
+                    "room wall",
+                    "ceiling",
+                    "floor",
+                    "desk table",
+                    "computer monitor",
+                    "curtain",
+                    "human face",
+                ]
+                self._update_yolo_world_classes("cup")
             except Exception as e:
                 print(f"[VLMTargetDetector] YOLO-World fallback to YOLOv8n ({e})...")
                 try:
                     from ultralytics import YOLO
 
                     self.model = YOLO("yolov8n.pt")
-                    self._current_classes = None
+                    self._active_target_key = None
                 except Exception as e2:
                     print(f"[VLMTargetDetector] YOLOv8 not available ({e2}), using color fallback.")
                     self.backend = "color"
 
+    def _update_yolo_world_classes(self, target_lower: str):
+        if getattr(self, "_active_target_key", None) == target_lower:
+            return
+        self._active_target_key = target_lower
+        pos_classes = self._target_synonyms.get(target_lower, [target_lower])
+        self._current_pos_set = set(pos_classes)
+        all_classes = pos_classes + self._distractor_classes
+        self.model.set_classes(all_classes)
+
     def detect(
-        self, frame_bgr: np.ndarray, target_prompt: str, conf_threshold: float = 0.20
+        self, frame_bgr: np.ndarray, target_prompt: str, conf_threshold: float = 0.35
     ) -> Optional[TargetDetection]:
         h, w = frame_bgr.shape[:2]
 
@@ -187,10 +211,8 @@ class VLMTargetDetector:
         self, frame_bgr: np.ndarray, target_prompt: str, conf_threshold: float, w: int, h: int
     ) -> Optional[TargetDetection]:
         target_lower = target_prompt.lower().strip()
-        # YOLO-World の場合、未知のクラス名が来たら動的に set_classes を更新
-        if getattr(self, "_current_classes", None) is not None and target_lower not in self._current_classes:
-            self._current_classes = ["cup", "plastic bottle", "cell phone", "milk carton", target_lower]
-            self.model.set_classes(self._current_classes)
+        if getattr(self, "_active_target_key", None) is not None:
+            self._update_yolo_world_classes(target_lower)
 
         results = self.model.predict(frame_bgr, conf=conf_threshold, verbose=False)
         if not results or len(results[0].boxes) == 0:
@@ -198,20 +220,25 @@ class VLMTargetDetector:
 
         boxes = results[0].boxes
         names = results[0].names
+        pos_set = getattr(self, "_current_pos_set", {target_lower})
 
         best_det: Optional[TargetDetection] = None
         for box in boxes:
             cls_id = int(box.cls[0].item())
             cls_name = str(names.get(cls_id, "")).lower()
             conf = float(box.conf[0].item())
-            if target_lower not in ("any", "*") and target_lower not in cls_name and cls_name not in target_lower:
-                continue
+            if target_lower not in ("any", "*"):
+                if cls_name not in pos_set and target_lower not in cls_name and cls_name not in target_lower:
+                    continue
             x0, y0, x1, y1 = [int(v) for v in box.xyxy[0].tolist()]
             bw, bh = max(1, x1 - x0), max(1, y1 - y0)
+            # 画面の45%以上を占める巨大なバウンディングボックスは壁・机などの背景誤検出として除外
+            if (bw * bh) > 0.45 * (w * h):
+                continue
             cx_norm = (x0 + 0.5 * bw) / float(w) - 0.5
             cy_norm = (y0 + 0.5 * bh) / float(h) - 0.5
             det = TargetDetection(
-                label=cls_name,
+                label=target_lower,
                 confidence=conf,
                 center_norm=(cx_norm, cy_norm),
                 bbox=(x0, y0, bw, bh),

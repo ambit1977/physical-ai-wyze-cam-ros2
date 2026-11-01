@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>Quest HMD × Wyze Cam Pan v3 ROS2 Teleop (MR Passthrough)</title>
+<title>Quest MR Passthrough × Wyze Cam ROS2 Teleop</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   html, body {
@@ -13,7 +13,7 @@
   }
   #ui-panel {
     position: fixed; top: 14px; left: 14px; right: 14px;
-    max-width: 600px; background: rgba(15, 23, 42, 0.92);
+    max-width: 620px; background: rgba(15, 23, 42, 0.92);
     border: 1px solid #334155; border-radius: 12px;
     padding: 16px 20px; z-index: 20; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
   }
@@ -27,7 +27,7 @@
     border-radius: 8px; border: none; cursor: pointer;
     background: #0284c7; color: #fff;
   }
-  button.ar-btn { background: #10b981; }
+  button.ar-btn { background: #10b981; font-size: 16px; }
   button.secondary { background: #475569; }
   button.target-btn { background: #6366f1; font-size: 14px; padding: 8px 14px; }
   button:active { transform: scale(0.98); }
@@ -42,15 +42,16 @@
 <div id="ui-panel">
   <h1>Quest MR Passthrough × Wyze Cam ROS2 Teleop</h1>
   <div class="row"><span>通信状態:</span> <span id="conn-status" class="badge-ok">待機中</span></div>
+  <div class="row"><span>XRセッション:</span> <span id="xr-status">未開始</span></div>
   <div class="row"><span>HMD 角度 (Yaw / Pitch):</span> <span id="angle-readout">0.0° / 0.0°</span></div>
   <div class="row"><span>動作モード:</span> <span id="mode-readout">HMD追従 (ACTIVE)</span></div>
   <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">
     ・<strong>右トリガー / Aボタン</strong>: 現在の頭の向きを正面(0°, 0°)にリセット<br/>
     ・<strong>右グリップボタン</strong>: 追従の一時停止 / 再開 (Clutch)<br/>
-    ・<strong>Bボタン</strong>: AI自動追尾 ON/OFF &amp; ターゲット切替（カップ → ペットボトル → スマホ → 牛乳パック）
+    ・<strong>Bボタン</strong>: AI自動探索・追尾 ON/OFF &amp; ターゲット切替（カップ → ペットボトル → スマホ → 牛乳パック）
   </div>
   <div class="btn-group">
-    <button id="enter-ar-btn" class="ar-btn">MRパススルー開始 (推奨)</button>
+    <button id="enter-ar-btn" class="ar-btn">🟢 MRパススルー開始 (背景透過)</button>
     <button id="enter-vr-btn">VRモード開始</button>
     <button id="recenter-btn" class="secondary">正面リセット</button>
   </div>
@@ -59,7 +60,11 @@
     <button class="target-btn" onclick="selectTarget(1)">🎯 ペットボトル</button>
     <button class="target-btn" onclick="selectTarget(2)">🎯 スマホ</button>
     <button class="target-btn" onclick="selectTarget(3)">🎯 牛乳パック</button>
-    <button class="secondary" onclick="selectTarget(-1)">AI OFF</button>
+    <button class="secondary" onclick="selectTarget(-1)">HMD追従に戻す</button>
+  </div>
+  <div class="btn-group">
+    <button class="secondary" style="background:#dc2626;" onclick="sendAction({toggle_record_demo:true})">🔴 デモ記録 ON/OFF</button>
+    <button class="secondary" style="background:#7c3aed;" onclick="sendAction({train_bc:true})">🧠 模倣学習 (Train BC)</button>
   </div>
   <div id="preview-box">
     <img id="preview-img" alt="Wyze Cam 16:9 Wide Live Stream" />
@@ -69,26 +74,28 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script>
 const connStatusEl = document.getElementById("conn-status");
+const xrStatusEl = document.getElementById("xr-status");
 const angleReadoutEl = document.getElementById("angle-readout");
 const modeReadoutEl = document.getElementById("mode-readout");
 const previewImg = document.getElementById("preview-img");
 
 const TARGET_NAMES = ["カップ (Cup)", "ペットボトル (Bottle)", "スマホ (Phone)", "牛乳パック (Milk Carton)"];
 
-// ====== Three.js Scene (alpha: true で Quest パススルー背景透過に対応) ======
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+// ====== Three.js Scene (alpha: true + premultipliedAlpha: true で Quest パススルー合成を有効化) ======
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: true });
 renderer.xr.enabled = true;
-renderer.setClearColor(0x000000, 0); // 完全透明（MRパススルー用）
+renderer.setClearColor(0x000000, 0);
+renderer.setClearAlpha(0.0);
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-// scene.background は null のままにすることで、MRモード時に現実の部屋（パススルー）が背景に映る
+scene.background = null; // 必ず null に維持（パススルーカメラ映像を背景に表示するため）
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
 scene.add(camera);
 
-// Wyze Cam 本来の 16:9 広角フル画角 (960x540) をそのまま再現するワイドスクリーン
+// Wyze Cam 本来の 16:9 広角フル画角 (960x540) ワイドスクリーン
 const videoCanvas = document.createElement("canvas");
 videoCanvas.width = 960;
 videoCanvas.height = 540;
@@ -104,17 +111,17 @@ videoTexture.minFilter = THREE.LinearFilter;
 videoTexture.magFilter = THREE.LinearFilter;
 
 // 16:9 大型ワイドスクリーン (2.24m x 1.26m) を視界正面 -1.65m に配置
-const screenGeom = new THREE.PlaneGeometry(2.24, 1.26);
+// 少し上や周囲の現実空間（パススルー）も見やすいよう絶妙なサイズ・位置に配置
+const screenGeom = new THREE.PlaneGeometry(2.10, 1.18);
 const screenMat = new THREE.MeshBasicMaterial({ map: videoTexture });
 const screenMesh = new THREE.Mesh(screenGeom, screenMat);
-screenMesh.position.set(0, 0.0, -1.65);
+screenMesh.position.set(0, -0.05, -1.65);
 camera.add(screenMesh);
 
-// スクリーン外枠フレーム
-const borderGeom = new THREE.EdgesGeometry(new THREE.PlaneGeometry(2.28, 1.30));
+const borderGeom = new THREE.EdgesGeometry(new THREE.PlaneGeometry(2.14, 1.22));
 const borderMat = new THREE.LineBasicMaterial({ color: 0x4ade80, linewidth: 3 });
 const borderMesh = new THREE.LineSegments(borderGeom, borderMat);
-borderMesh.position.set(0, 0.0, -1.649);
+borderMesh.position.set(0, -0.05, -1.649);
 camera.add(borderMesh);
 
 // ====== 16:9 ライブJPEGフレーム取得ループ ======
@@ -147,6 +154,7 @@ let prevTrigger = false;
 let prevGrip = false;
 let prevBButton = false;
 let lastSendTime = 0;
+let isPassthroughSession = true;
 
 function quaternionToYawPitchRoll(q) {
   const fx = -2.0 * (q.x * q.z + q.w * q.y);
@@ -169,16 +177,24 @@ async function sendPoseToMac(yaw, pitch, extra = {}) {
       yaw: yaw,
       pitch: pitch,
       paused: paused,
-      ai_mode: aiMode,
-      target_idx: targetIdx,
       ts: Date.now() / 1000.0
     }, extra);
+    if (extra.set_target) {
+      payload.ai_mode = aiMode;
+      payload.target_idx = targetIdx;
+    }
     const resp = await fetch("/hmd_pose", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
     if (resp.ok) {
+      const data = await resp.json();
+      if (!extra.set_target && typeof data.ai_mode === "boolean") {
+        aiMode = data.ai_mode;
+        targetIdx = data.target_idx || 0;
+        updateModeUI();
+      }
       connStatusEl.textContent = "接続中 (ROS2 Active)";
       connStatusEl.className = "badge-ok";
     }
@@ -187,6 +203,10 @@ async function sendPoseToMac(yaw, pitch, extra = {}) {
     connStatusEl.className = "badge-warn";
   }
 }
+
+window.sendAction = function(extraObj) {
+  sendPoseToMac(0, 0, extraObj);
+};
 
 window.selectTarget = function(idx) {
   if (idx < 0) {
@@ -207,7 +227,7 @@ document.getElementById("recenter-btn").addEventListener("click", () => {
 
 function updateModeUI() {
   if (aiMode) {
-    modeReadoutEl.textContent = `AIロックオン: ${TARGET_NAMES[targetIdx]}`;
+    modeReadoutEl.textContent = `AI探索・追尾: ${TARGET_NAMES[targetIdx]}`;
     borderMat.color.setHex(0x38bdf8);
   } else if (paused) {
     modeReadoutEl.textContent = "一時停止中 (CLUTCH PAUSED)";
@@ -218,37 +238,54 @@ function updateModeUI() {
   }
 }
 
-async function startXRSession(preferAR) {
+// クリックイベント内で直接 requestSession("immersive-ar") を呼ぶ（非同期チェックを挟まないことで確実にAR起動）
+document.getElementById("enter-ar-btn").addEventListener("click", async () => {
   if (!navigator.xr) {
-    alert("WebXRが有効ではありません。HTTPS URLで開いているか確認してください。");
+    alert("WebXRが有効ではありません。");
     return;
   }
-  let mode = preferAR ? "immersive-ar" : "immersive-vr";
   try {
-    if (preferAR) {
-      const arSupported = await navigator.xr.isSessionSupported("immersive-ar");
-      if (!arSupported) mode = "immersive-vr";
-    }
-    if (mode === "immersive-ar") {
-      scene.background = null;
-      renderer.setClearColor(0x000000, 0);
-    } else {
-      scene.background = new THREE.Color(0x090d16);
-    }
-    const session = await navigator.xr.requestSession(mode, {
-      optionalFeatures: ["local-floor"]
+    isPassthroughSession = true;
+    scene.background = null;
+    renderer.setClearColor(0x000000, 0);
+    renderer.setClearAlpha(0.0);
+    const session = await navigator.xr.requestSession("immersive-ar", {
+      optionalFeatures: ["local-floor", "bounded-floor"]
     });
+    xrStatusEl.textContent = "MRパススルー稼働中 (immersive-ar)";
     renderer.xr.setReferenceSpaceType("local-floor");
     await renderer.xr.setSession(session);
-  } catch (err) {
-    alert("XRセッション開始エラー: " + err.message);
+  } catch (arErr) {
+    console.warn("immersive-ar failed, falling back to immersive-vr:", arErr);
+    alert("immersive-ar (パススルー) が拒否されたため VR モードで起動します: " + arErr.message);
+    const session = await navigator.xr.requestSession("immersive-vr", {
+      optionalFeatures: ["local-floor"]
+    });
+    xrStatusEl.textContent = "VRモード稼働中 (immersive-vr)";
+    renderer.xr.setReferenceSpaceType("local-floor");
+    await renderer.xr.setSession(session);
   }
-}
+});
 
-document.getElementById("enter-ar-btn").addEventListener("click", () => startXRSession(true));
-document.getElementById("enter-vr-btn").addEventListener("click", () => startXRSession(false));
+document.getElementById("enter-vr-btn").addEventListener("click", async () => {
+  if (!navigator.xr) return;
+  isPassthroughSession = false;
+  scene.background = new THREE.Color(0x090d16);
+  const session = await navigator.xr.requestSession("immersive-vr", {
+    optionalFeatures: ["local-floor"]
+  });
+  xrStatusEl.textContent = "VRモード稼働中 (immersive-vr)";
+  renderer.xr.setReferenceSpaceType("local-floor");
+  await renderer.xr.setSession(session);
+});
 
 function onXRFrame(timestamp, frame) {
+  if (isPassthroughSession) {
+    scene.background = null;
+    renderer.setClearColor(0x000000, 0);
+    renderer.setClearAlpha(0.0);
+  }
+
   const refSpace = renderer.xr.getReferenceSpace();
   if (!refSpace) return;
 
