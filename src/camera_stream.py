@@ -14,7 +14,7 @@ import time
 from typing import Optional, Tuple, Union
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-    "rtsp_transport;udp|fflags;nobuffer|flags;low_delay|probesize;32|analyzeduration;0|max_delay;0"
+    "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|probesize;32|analyzeduration;0|max_delay;0"
 )
 
 import cv2

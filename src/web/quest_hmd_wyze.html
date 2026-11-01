@@ -60,11 +60,14 @@
     <button class="target-btn" onclick="selectTarget(1)">🎯 ペットボトル</button>
     <button class="target-btn" onclick="selectTarget(2)">🎯 スマホ</button>
     <button class="target-btn" onclick="selectTarget(3)">🎯 牛乳パック</button>
+    <button class="target-btn" onclick="selectTarget(4)">🎯 本 (Book)</button>
+    <button class="target-btn" onclick="selectTarget(5)">🎯 リモコン</button>
     <button class="secondary" onclick="selectTarget(-1)">HMD追従に戻す</button>
   </div>
   <div class="btn-group">
-    <button class="secondary" style="background:#dc2626;" onclick="sendAction({toggle_record_demo:true})">🔴 デモ記録 ON/OFF</button>
-    <button class="secondary" style="background:#7c3aed;" onclick="sendAction({train_bc:true})">🧠 模倣学習 (Train BC)</button>
+    <button class="secondary" style="background:#d97706;" onclick="sendAction({finetune_visual:true})">📸 目の前の物体をFT学習 ([f])</button>
+    <button class="secondary" style="background:#dc2626;" onclick="sendAction({toggle_record_demo:true})">🔴 デモ記録 ON/OFF ([d])</button>
+    <button class="secondary" style="background:#7c3aed;" onclick="sendAction({train_bc:true})">🧠 模倣学習 (Train BC) ([l])</button>
   </div>
   <div id="preview-box">
     <img id="preview-img" alt="Wyze Cam 16:9 Wide Live Stream" />
@@ -79,7 +82,14 @@ const angleReadoutEl = document.getElementById("angle-readout");
 const modeReadoutEl = document.getElementById("mode-readout");
 const previewImg = document.getElementById("preview-img");
 
-const TARGET_NAMES = ["カップ (Cup)", "ペットボトル (Bottle)", "スマホ (Phone)", "牛乳パック (Milk Carton)"];
+const TARGET_NAMES = [
+  "カップ (Cup)",
+  "ペットボトル (Bottle)",
+  "スマホ (Phone)",
+  "牛乳パック (Milk Carton)",
+  "本・ノート (Book)",
+  "リモコン (Remote)"
+];
 
 // ====== Three.js Scene (alpha: true + premultipliedAlpha: true で Quest パススルー合成を有効化) ======
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: true });

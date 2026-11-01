@@ -48,9 +48,16 @@ from src.models.bc_search_policy import QuestDemoBCManager
 WEB_HTML_PATH = Path(__file__).resolve().parent / "web" / "quest_hmd_wyze.html"
 CERT_FILE = Path("/tmp/pai_quest_cert.pem")
 KEY_FILE = Path("/tmp/pai_quest_key.pem")
-# カップ、ペットボトル、スマホ、牛乳パック (YOLO-World / OWLv2 対応)
-AI_TARGETS = ["cup", "plastic bottle", "cell phone", "milk carton"]
-AI_TARGET_LABELS = ["Cup (カップ)", "Bottle (ペットボトル)", "Phone (スマホ)", "Milk Carton (牛乳パック)"]
+# カップ、ペットボトル、スマホ、牛乳パック + 鉄板認識アイテム(本・リモコン)
+AI_TARGETS = ["cup", "plastic bottle", "cell phone", "milk carton", "book", "remote"]
+AI_TARGET_LABELS = [
+    "Cup (カップ)",
+    "Bottle (ペットボトル)",
+    "Phone (スマホ)",
+    "Milk Carton (牛乳パック)",
+    "Book (本・ノート)",
+    "Remote (リモコン)",
+]
 
 
 def get_lan_ip() -> str:
@@ -103,6 +110,7 @@ class SharedTeleopState:
         self.ai_target_idx: int = 0
         self.req_toggle_record: bool = False
         self.req_train_bc: bool = False
+        self.req_finetune_visual: bool = False
         self.last_input_ts: float = 0.0
         self.latest_jpeg: bytes = b""
         self.running: bool = True
@@ -340,6 +348,8 @@ def start_webxr_https_server(state: SharedTeleopState, host_ip: str, port: int =
                             state.req_toggle_record = True
                         elif data.get("train_bc"):
                             state.req_train_bc = True
+                        elif data.get("finetune_visual"):
+                            state.req_finetune_visual = True
                         elif data.get("set_target"):
                             state.ai_mode = bool(data.get("ai_mode", False))
                             state.ai_target_idx = int(data.get("target_idx", 0)) % len(AI_TARGETS)
@@ -390,7 +400,7 @@ def main():
     parser = argparse.ArgumentParser(description="Quest HMD/6DoF Arm -> ROS2 -> Wyze Cam Pan v3 Teleop & AI Search")
     parser.add_argument("--wyze-rtsp", type=str, default=Config.WYZE_CAM_RTSP, help="Wyze Cam RTSP URL")
     parser.add_argument("--ai-backend", type=str, default="yolo", choices=["yolo", "owlv2", "moondream"])
-    parser.add_argument("--conf", type=float, default=0.35, help="Detection confidence threshold")
+    parser.add_argument("--conf", type=float, default=0.25, help="Detection confidence threshold")
     parser.add_argument("--deadzone", type=float, default=1.5, help="HMD tremor deadzone in degrees")
     parser.add_argument("--ema", type=float, default=0.45, help="Low-pass filter smoothing factor")
     parser.add_argument("--dry-run", action="store_true")
@@ -431,13 +441,13 @@ def main():
 
     writer = None
 
-    print("\n" + "=" * 82)
-    print("  Quest MR Passthrough × 多軸アーム→PT視線変換 × ROS2 Wyze Cam Pan v3 起動完了！")
+    print("\n" + "=" * 86)
+    print("  Quest MR Passthrough × 多軸アーム→PT視線変換 × Online FT/RL Wyze Cam Pan v3 起動完了！")
     print(f"  [方式1: WebXR MRパススルー] Questブラウザで開く: https://{lan_ip}:8443")
     print("  [方式2: Open Teach APK (MRパススルー + 6DoFアーム姿勢→PT視線変換)] アプリを起動するだけ")
-    print("  ターゲット: 1.カップ(cup) / 2.ペットボトル(plastic bottle) / 3.スマホ(cell phone) / 4.牛乳パック(milk carton)")
-    print("  Macキー: [a] AI探索・中央ロックON/OFF | [t] 対象切替 | [d] デモ記録開始/停止 | [l] 模倣学習 | [r] 正面 | [q] 終了")
-    print("=" * 82 + "\n")
+    print("  ターゲット: 1.カップ / 2.ペットボトル / 3.スマホ / 4.牛乳パック / 5.本(book) / 6.リモコン(remote)")
+    print("  Macキー: [a] AI探索ON/OFF | [t] 対象切替 | [f] 目の前の物体をFT学習 | [d] デモ記録 | [l] BC学習 | [r] 正面 | [q] 終了")
+    print("=" * 86 + "\n")
 
     try:
         while True:
@@ -469,13 +479,19 @@ def main():
                 source_mode = state.source_mode
                 req_rec = state.req_toggle_record
                 req_train = state.req_train_bc
+                req_ft = state.req_finetune_visual
                 state.req_toggle_record = False
                 state.req_train_bc = False
+                state.req_finetune_visual = False
 
             if req_rec:
                 bc_manager.toggle_recording(state.smooth_pan, state.smooth_tilt)
             if req_train:
                 bc_manager.train_policy()
+            if req_ft and frame is not None:
+                if detector is None:
+                    detector = VLMTargetDetector(backend=args.ai_backend)
+                detector.finetune_on_current_frame(frame, target_name)
 
             # 物体検出 (AIモード中、または人間がQuestでデモ記録中の場合も視覚特徴として実行)
             det = None
@@ -524,6 +540,12 @@ def main():
                     current_tilt=state.smooth_tilt,
                     bc_delta=bc_delta,
                 )
+                if detector is not None:
+                    detector.report_rl_feedback(
+                        target_name,
+                        det,
+                        is_centered=(gaze_cmd.phase == "LOCKED_CENTER"),
+                    )
                 with state.lock:
                     state.smooth_pan = gaze_cmd.pan_deg
                     state.smooth_tilt = gaze_cmd.tilt_deg
@@ -623,7 +645,7 @@ def main():
             )
             cv2.putText(
                 view,
-                "Keys: [a]AI Search/Lock [t]Target [d]Rec Demo [l]Train BC [r]Center [q]Quit",
+                "Keys: [a]AI [t]Target [f]Visual-FT [d]Rec [l]Train-BC [r]Center [q]Quit",
                 (22, 168),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.43,
@@ -718,6 +740,11 @@ def main():
                     state.ai_target_idx = (state.ai_target_idx + 1) % len(AI_TARGETS)
                     retargeter.confirm_streak = 0
                     print(f"[Key 't'] Target switched to '{state.current_ai_target}'")
+            elif key == ord("f"):
+                if frame is not None:
+                    if detector is None:
+                        detector = VLMTargetDetector(backend=args.ai_backend)
+                    detector.finetune_on_current_frame(frame, target_name)
             elif key == ord("d"):
                 bc_manager.toggle_recording(state.smooth_pan, state.smooth_tilt)
             elif key == ord("l"):
