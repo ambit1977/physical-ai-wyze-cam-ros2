@@ -120,7 +120,7 @@ class WyzePTZProxyNode(Node):
         else:
             # Wyze Cam Pan v3 (HL_PAN3): /api/<cam>/ptz_position/<vertical>,<horizontal>
             wyze_horiz = int(round(max(0.0, min(350.0, 180.0 + pan_deg))))
-            wyze_vert = int(round(max(0.0, min(180.0, 90.0 + tilt_deg))))
+            wyze_vert = int(round(max(0.0, min(180.0, 90.0 + tilt_deg * 2.0))))
             ok = self.send_ptz_position(wyze_vert, wyze_horiz)
             if ok:
                 self.current_pan = pan_deg

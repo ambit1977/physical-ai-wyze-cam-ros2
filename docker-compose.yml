@@ -30,7 +30,7 @@ services:
     container_name: ros2-wyze-proxy
     restart: unless-stopped
     ports:
-      - "9090:9090"   # rosbridge WebSocket (ホスト側PythonのAIノードと通信)
+      - "9092:9090"   # rosbridge WebSocket (ホスト側PythonのAIノードと通信)
     environment:
       - WYZE_BRIDGE_HOST=http://wyze-bridge:5000
       - WYZE_CAM_NAME=${WYZE_CAM_NAME:-wyze-cam-pan}

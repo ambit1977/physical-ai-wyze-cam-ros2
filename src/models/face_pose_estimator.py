@@ -123,10 +123,17 @@ class FacePoseEstimator:
         right_eye = pts_2d[3]
         eye_mid = 0.5 * (left_eye + right_eye)
         eye_dist = max(1.0, float(np.linalg.norm(right_eye - left_eye)))
-        face_h = max(1.0, float(np.linalg.norm(chin - eye_mid)))
 
-        yaw_geom = float(np.clip(((nose[0] - eye_mid[0]) / (0.5 * eye_dist)) * 55.0, -75.0, 75.0))
-        pitch_geom = float(np.clip((0.36 - (nose[1] - eye_mid[1]) / face_h) * 135.0, -60.0, 60.0))
+        # 水平角度(Yaw): 左右の目の中点に対する鼻先の水平変位 (右向き=正)
+        yaw_geom = float(np.clip(((nose[0] - eye_mid[0]) / (0.5 * eye_dist)) * 60.0, -80.0, 80.0))
+
+        # 垂直角度(Pitch): (目〜鼻の距離) と (鼻〜顎の距離) の比率から算出
+        # 上を向くと鼻が目線に近づき(d_upper小)・顎が離れる(d_lower大) -> ratio減少 -> Pitch正(上向き)
+        d_upper = max(1.0, float(nose[1] - eye_mid[1]))
+        d_lower = max(1.0, float(chin[1] - nose[1]))
+        up_down_ratio = d_upper / d_lower
+        pitch_geom = float(np.clip((0.56 - up_down_ratio) * 130.0, -65.0, 65.0))
+
         roll_deg = float(
             np.degrees(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
         )
@@ -135,10 +142,11 @@ class FacePoseEstimator:
             mat = np.array(result.facial_transformation_matrixes[0])[:3, :3]
             sy = float(np.sqrt(mat[0, 0] ** 2 + mat[1, 0] ** 2))
             if sy > 1e-6:
-                pitch_mat = float(np.degrees(np.arctan2(mat[2, 1], mat[2, 2])))
+                # MediaPipe座標系では上向き時に mat[2,1] が負になるため符号を反転して一致させる
+                pitch_mat = float(-np.degrees(np.arctan2(mat[2, 1], mat[2, 2])))
                 yaw_mat = float(np.degrees(np.arctan2(-mat[2, 0], sy)))
-                yaw_deg = 0.5 * yaw_geom + 0.5 * yaw_mat
-                pitch_deg = 0.5 * pitch_geom + 0.5 * pitch_mat
+                yaw_deg = 0.6 * yaw_geom + 0.4 * yaw_mat
+                pitch_deg = 0.65 * pitch_geom + 0.35 * pitch_mat
             else:
                 yaw_deg, pitch_deg = yaw_geom, pitch_geom
         else:

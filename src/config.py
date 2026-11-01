@@ -20,7 +20,7 @@ class Config:
 
     # ROS2 rosbridge 設定
     ROSBRIDGE_HOST: str = os.getenv("ROSBRIDGE_HOST", "localhost")
-    ROSBRIDGE_PORT: int = int(os.getenv("ROSBRIDGE_PORT", "9090"))
+    ROSBRIDGE_PORT: int = int(os.getenv("ROSBRIDGE_PORT", "9092"))
 
     # PTZ 可動域 (度)
     PAN_MIN: float = -170.0
