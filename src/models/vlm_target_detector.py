@@ -225,7 +225,12 @@ class VLMTargetDetector:
         best_det: Optional[TargetDetection] = None
         for box in boxes:
             cls_id = int(box.cls[0].item())
-            cls_name = str(names.get(cls_id, "")).lower()
+            if isinstance(names, dict):
+                cls_name = str(names.get(cls_id, "")).lower()
+            elif isinstance(names, (list, tuple)) and 0 <= cls_id < len(names):
+                cls_name = str(names[cls_id]).lower()
+            else:
+                cls_name = ""
             conf = float(box.conf[0].item())
             if target_lower not in ("any", "*"):
                 if cls_name not in pos_set and target_lower not in cls_name and cls_name not in target_lower:

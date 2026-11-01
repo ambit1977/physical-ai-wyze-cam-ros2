@@ -394,7 +394,7 @@ def main():
     parser.add_argument("--deadzone", type=float, default=1.5, help="HMD tremor deadzone in degrees")
     parser.add_argument("--ema", type=float, default=0.45, help="Low-pass filter smoothing factor")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--record", type=str, default="", help="Optional MP4 path to record demo video")
+    parser.add_argument("--record", "--Record", dest="record", type=str, default="", help="Optional MP4 path to record demo video")
     args = parser.parse_args()
 
     lan_ip = get_lan_ip()
