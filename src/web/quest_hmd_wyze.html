@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>Quest HMD × Wyze Cam Pan v3 ROS2 Teleop</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #0b0f19; color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  #ui-panel {
+    position: fixed; top: 16px; left: 16px; right: 16px;
+    max-width: 560px; background: rgba(15, 23, 42, 0.92);
+    border: 1px solid #334155; border-radius: 12px;
+    padding: 16px 20px; z-index: 20; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+  }
+  h1 { margin: 0 0 8px 0; font-size: 18px; color: #38bdf8; }
+  .row { margin: 6px 0; font-size: 14px; display: flex; justify-content: space-between; }
+  .badge-ok { color: #4ade80; font-weight: bold; }
+  .badge-warn { color: #fb923c; font-weight: bold; }
+  .btn-group { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  button {
+    font-size: 16px; font-weight: bold; padding: 12px 20px;
+    border-radius: 8px; border: none; cursor: pointer;
+    background: #0284c7; color: #fff;
+  }
+  button.secondary { background: #475569; }
+  button:active { transform: scale(0.98); }
+  #preview-box {
+    margin-top: 12px; text-align: center;
+  }
+  #preview-img {
+    width: 100%; max-height: 240px; object-fit: contain;
+    border-radius: 8px; border: 1px solid #475569; background: #000;
+  }
+</style>
+</head>
+<body>
+<div id="ui-panel">
+  <h1>Quest HMD × Wyze Cam ROS2 Teleop</h1>
+  <div class="row"><span>通信状態:</span> <span id="conn-status" class="badge-ok">待機中</span></div>
+  <div class="row"><span>HMD 角度 (Yaw / Pitch):</span> <span id="angle-readout">0.0° / 0.0°</span></div>
+  <div class="row"><span>動作モード:</span> <span id="mode-readout">HMD追従 (ACTIVE)</span></div>
+  <div style="font-size: 12px; color: #94a3b8; margin-top: 6px;">
+    ・VR内では<strong>視界正面に固定された仮想スクリーン</strong>で常時Wyze Cam映像を見られます<br/>
+    ・<strong>右トリガー / Aボタン</strong>: 現在の頭の向きを正面(0°, 0°)に再基準化 (Re-center)<br/>
+    ・<strong>右グリップボタン</strong>: 追従の一時停止 / 再開 (Clutch)<br/>
+    ・<strong>Bボタン</strong>: AI物体自動ロックオンモード切替
+  </div>
+  <div class="btn-group">
+    <button id="enter-vr-btn">VR HMDモード開始 (Enter VR)</button>
+    <button id="recenter-btn" class="secondary">正面リセット</button>
+    <button id="ai-btn" class="secondary">AIターゲット切替</button>
+  </div>
+  <div id="preview-box">
+    <img id="preview-img" alt="Wyze Cam Live Stream" />
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+const connStatusEl = document.getElementById("conn-status");
+const angleReadoutEl = document.getElementById("angle-readout");
+const modeReadoutEl = document.getElementById("mode-readout");
+const previewImg = document.getElementById("preview-img");
+
+// ====== Three.js Scene & Head-Locked VR Cinema Screen ======
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.xr.enabled = true;
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x090d16);
+
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
+scene.add(camera); // cameraをsceneに追加することで、cameraの子要素がHMDに完全追従(Head-Locked HUD)する
+
+// 背景の空間グリッド（自分がどのくらい首を回しているかの空間把握用）
+const gridHelper = new THREE.GridHelper(10, 24, 0x1e293b, 0x1e293b);
+gridHelper.position.y = -1.2;
+scene.add(gridHelper);
+
+// HMDの視界正面(距離 1.8m)に常時固定される大型スクリーン (16:9 -> 1.92m x 1.08m)
+const videoCanvas = document.createElement("canvas");
+videoCanvas.width = 640;
+videoCanvas.height = 480;
+const videoCtx = videoCanvas.getContext("2d");
+videoCtx.fillStyle = "#111";
+videoCtx.fillRect(0, 0, 640, 480);
+videoCtx.fillStyle = "#38bdf8";
+videoCtx.font = "bold 24px sans-serif";
+videoCtx.fillText("Connecting to Wyze Cam Pan v3...", 120, 240);
+
+const videoTexture = new THREE.CanvasTexture(videoCanvas);
+videoTexture.minFilter = THREE.LinearFilter;
+videoTexture.magFilter = THREE.LinearFilter;
+
+const screenGeom = new THREE.PlaneGeometry(1.75, 1.31);
+const screenMat = new THREE.MeshBasicMaterial({ map: videoTexture });
+const screenMesh = new THREE.Mesh(screenGeom, screenMat);
+// カメラ（HMD）のローカル座標系で正面 -1.85m に固定配置！
+// どれだけ真上・真下・真横を向いても常に目の前にWyze映像が表示される
+screenMesh.position.set(0, 0.0, -1.85);
+camera.add(screenMesh);
+
+// スクリーン外枠フレーム（状態表示色: 緑=追従中, 黄=一時停止, 水色=AIロックオン）
+const borderGeom = new THREE.EdgesGeometry(new THREE.PlaneGeometry(1.79, 1.35));
+const borderMat = new THREE.LineBasicMaterial({ color: 0x4ade80, linewidth: 3 });
+const borderMesh = new THREE.LineSegments(borderGeom, borderMat);
+borderMesh.position.set(0, 0.0, -1.849);
+camera.add(borderMesh);
+
+// ====== ライブJPEGフレーム取得ループ (~12 FPS, 滞留防止) ======
+let fetchingFrame = false;
+const frameLoader = new Image();
+frameLoader.crossOrigin = "anonymous";
+frameLoader.onload = () => {
+  videoCtx.drawImage(frameLoader, 0, 0, videoCanvas.width, videoCanvas.height);
+  videoTexture.needsUpdate = true;
+  previewImg.src = frameLoader.src;
+  fetchingFrame = false;
+};
+frameLoader.onerror = () => {
+  fetchingFrame = false;
+};
+
+setInterval(() => {
+  if (fetchingFrame) return;
+  fetchingFrame = true;
+  frameLoader.src = "/frame.jpg?t=" + performance.now();
+}, 85);
+
+// ====== HMD 姿勢計算 & クラッチ / ゼロ点補正 ======
+let refYaw = null;
+let refPitch = null;
+let paused = false;
+let aiMode = false;
+let prevTrigger = false;
+let prevGrip = false;
+let prevBButton = false;
+let lastSendTime = 0;
+
+function quaternionToYawPitchRoll(q) {
+  // WebXR (Right-handed: -Z forward, +X right, +Y up)
+  // Forward vector f = q * (0, 0, -1)
+  const fx = -2.0 * (q.x * q.z + q.w * q.y);
+  const fy = -2.0 * (q.y * q.z - q.w * q.x);
+  const fz = -(1.0 - 2.0 * (q.x * q.x + q.y * q.y));
+
+  // 右向きを正のPan(Yaw)、上向きを正のTilt(Pitch)とする
+  const yawDeg = Math.atan2(fx, -fz) * (180.0 / Math.PI);
+  const pitchDeg = Math.asin(Math.max(-1.0, Math.min(1.0, fy))) * (180.0 / Math.PI);
+  return { yawDeg, pitchDeg };
+}
+
+function wrapAngleDeg(deg) {
+  let d = ((deg + 180.0) % 360.0);
+  if (d < 0) d += 360.0;
+  return d - 180.0;
+}
+
+async function sendPoseToMac(yaw, pitch, recenter, toggleAi) {
+  try {
+    const resp = await fetch("/hmd_pose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        yaw: yaw,
+        pitch: pitch,
+        paused: paused,
+        ai_mode: aiMode,
+        recenter: recenter,
+        toggle_ai: toggleAi,
+        ts: Date.now() / 1000.0
+      })
+    });
+    if (resp.ok) {
+      connStatusEl.textContent = "接続中 (ROS2 Active)";
+      connStatusEl.className = "badge-ok";
+    }
+  } catch (e) {
+    connStatusEl.textContent = "通信エラー";
+    connStatusEl.className = "badge-warn";
+  }
+}
+
+document.getElementById("recenter-btn").addEventListener("click", () => {
+  refYaw = null;
+  refPitch = null;
+  sendPoseToMac(0, 0, true, false);
+});
+
+document.getElementById("ai-btn").addEventListener("click", () => {
+  aiMode = !aiMode;
+  updateModeUI();
+  sendPoseToMac(0, 0, false, true);
+});
+
+function updateModeUI() {
+  if (aiMode) {
+    modeReadoutEl.textContent = "AI自動ターゲット追従 (VLM/YOLO)";
+    borderMat.color.setHex(0x38bdf8);
+  } else if (paused) {
+    modeReadoutEl.textContent = "一時停止中 (CLUTCH PAUSED)";
+    borderMat.color.setHex(0xfacc15);
+  } else {
+    modeReadoutEl.textContent = "HMD追従 (ACTIVE)";
+    borderMat.color.setHex(0x4ade80);
+  }
+}
+
+document.getElementById("enter-vr-btn").addEventListener("click", async () => {
+  if (!navigator.xr) {
+    alert("WebXRが有効ではありません。HTTPS URLで開いているか確認してください。");
+    return;
+  }
+  const session = await navigator.xr.requestSession("immersive-vr", {
+    optionalFeatures: ["local-floor"]
+  });
+  renderer.xr.setReferenceSpaceType("local-floor");
+  await renderer.xr.setSession(session);
+});
+
+function onXRFrame(timestamp, frame) {
+  const refSpace = renderer.xr.getReferenceSpace();
+  if (!refSpace) return;
+
+  const viewerPose = frame.getViewerPose(refSpace);
+  if (!viewerPose) return;
+
+  // コントローラーボタン判定 (右コントローラー優先)
+  let triggerPressed = false;
+  let gripPressed = false;
+  let bPressed = false;
+
+  for (const source of frame.session.inputSources) {
+    if (!source.gamepad) continue;
+    const btns = source.gamepad.buttons;
+    // buttons[0]=Trigger, buttons[1]=Grip, buttons[4]=A/X, buttons[5]=B/Y
+    if ((btns[0] && btns[0].pressed) || (btns[4] && btns[4].pressed)) {
+      triggerPressed = true;
+    }
+    if (btns[1] && btns[1].pressed) {
+      gripPressed = true;
+    }
+    if (btns[5] && btns[5].pressed) {
+      bPressed = true;
+    }
+  }
+
+  const q = viewerPose.transform.orientation;
+  const { yawDeg, pitchDeg } = quaternionToYawPitchRoll(q);
+
+  if (refYaw === null || (triggerPressed && !prevTrigger)) {
+    refYaw = yawDeg;
+    refPitch = pitchDeg;
+  }
+  if (gripPressed && !prevGrip) {
+    paused = !paused;
+    updateModeUI();
+  }
+  let toggledAi = false;
+  if (bPressed && !prevBButton) {
+    aiMode = !aiMode;
+    toggledAi = true;
+    updateModeUI();
+  }
+  prevTrigger = triggerPressed;
+  prevGrip = gripPressed;
+  prevBButton = bPressed;
+
+  const relYaw = wrapAngleDeg(yawDeg - refYaw);
+  const relPitch = Math.max(-60.0, Math.min(60.0, pitchDeg - refPitch));
+
+  angleReadoutEl.textContent = `${relYaw.toFixed(1)}° / ${relPitch.toFixed(1)}°`;
+
+  if (timestamp - lastSendTime >= 100) { // 10 Hz
+    lastSendTime = timestamp;
+    sendPoseToMac(relYaw, relPitch, false, toggledAi);
+  }
+}
+
+renderer.setAnimationLoop((timestamp, frame) => {
+  if (frame) onXRFrame(timestamp, frame);
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

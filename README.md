@@ -2,10 +2,14 @@
 
 ルンバ（Create 3）のROS2インターフェース（`/cmd_vel`）と互換性を持つ **Wyze Cam Pan v3 用 ROS2 PTZプロキシ**、および以下2つのAI制御モードを実装したパッケージです。
 
-1. **【モード1】顔角度ミラーリング追従 (`src/node_face_mirror.py`)**
-   - 静止カメラ（**ATOM Cam 2** または Mac内蔵/USBカメラ）で撮影した自分の顔画像から、3D顔姿勢（Yaw / Pitch / Roll）とランドマーク特徴量を抽出。
+1. **【モード0（推奨・メイン構成）】Meta Quest HMD 視界固定ライブスクリーン × 頭部角度追従 × AIターゲットロックオン (`src/node_quest_wyze_teleop.py`)**
+   - PC画面の前で顔を大きく上下左右に向けるとPC画面が見えなくなり、HMDを被るとカメラから顔が隠れるという課題を解決するため、**Meta Quest HMD を被り、VR空間の視界正面に常時固定（Head-Locked HUD）された大型スクリーンで Wyze Cam Pan v3 のライブ映像を見ながら、HMD（またはコントローラー）の向いている角度（Yaw/Pitch）で実機カメラをROS2制御**します。
+   - さらに Quest の **Bボタン1つで AI 自動ターゲットロックオン（YOLOv8 / Hugging Face OWLv2 / Moondream2）** に切り替わり、画面内の対象物を自動追尾します。
+   - **WebXR 方式（`https://<MacのIP>:8443`）** と、既存のサイドロード済み **Open Teach APK 方式（ZeroMQ `TCP 8087 / 10505` + `UDP 8125` 自動探索）** の両方に同時対応しています。
+2. **【モード1】顔角度ミラーリング追従 (`src/node_face_mirror.py`)**
+   - 静止カメラで撮影した自分の顔画像から、3D顔姿勢（Yaw / Pitch / Roll）とランドマーク特徴量を抽出。
    - PyTorchのニューラルキャリブレーションモデル（`FaceToPTZNet`）でカメラ間の位置オフセット・非線形性を補正し、ROS2（`/wyze/cmd_ptz`）経由で **Wyze Cam Pan v3 を自分の顔と同じ角度にリアルタイム同期** させます。
-2. **【モード2】Hugging Face VLM / Zero-Shot 指定ターゲット指向 (`src/node_target_director.py`)**
+3. **【モード2】Hugging Face VLM / Zero-Shot 指定ターゲット指向 (`src/node_target_director.py`)**
    - Hugging Face のオープンボキャブラリ視覚モデル（**`google/owlv2-base-patch16-ensemble`** または軽量VLM **`vikhyatk/moondream2`**、高速な **`YOLOv8`**）を使用。
    - 自然言語テキスト（例: `"coffee mug"`, `"black bottle"`, `"cell phone"`, `"remote control"`）で指定した対象物を探索・検出し、画面中央に捉えるように **Wyze Cam Pan v3 の向きを自動で制御（探索スキャン＋ロックオン追従）** します。
 
