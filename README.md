@@ -4,7 +4,7 @@
 市販のスマートPTZカメラ **Wyze Cam Pan v3 (`HL_PAN3`)** を 2自由度（Pan/Tilt）のアクティブビジョン・ロボットとして扱い、**ROS2 Humble（`/wyze/cmd_ptz` およびルンバ Create 3 互換 `/cmd_vel`）** を介して実機制御するシステムを実装しています。
 
 📄 **詳細な提出レポート（概要・目的・工夫点・今後の発展課題）**: **[REPORT.md](./REPORT.md)**  
-🎬 **デモ動画公開チャンネル (YouTube)**: https://www.youtube.com/@ericapapapapapa （2倍速・`2x Speed` 明記版）
+🎬 **デモ動画 URL (YouTube 公開)**: **https://youtu.be/b3hHwuHKy7I** （チャンネル: https://www.youtube.com/@ericapapapapapa / 2倍速・`2x Speed` 明記、1分37秒）
 
 ---
 

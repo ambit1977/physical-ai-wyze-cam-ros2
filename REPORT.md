@@ -2,7 +2,7 @@
 
 - **課題タイトル**: Meta Quest HMD × ROS2 × VLM/Open-Vocabulary 視覚認識による実機 PTZ カメラ（Wyze Cam Pan v3）の視線同期テレオペレーションと自律探索・対象捕捉システム
 - **GitHub リポジトリ (Public)**: https://github.com/ambit1977/physical-ai-wyze-cam-ros2
-- **デモ動画公開チャンネル (YouTube)**: https://www.youtube.com/@ericapapapapapa （※2倍速再生・画面右上に `2x Speed` 明記、約1分42秒）
+- **デモ動画 URL (YouTube 公開)**: https://youtu.be/b3hHwuHKy7I （チャンネル: https://www.youtube.com/@ericapapapapapa / 2倍速・`2x Speed` 明記、1分37秒）
 
 ---
 
